@@ -14,16 +14,23 @@ jobs:
           fetch-depth: 0
       - name: Build verification image
         run: docker build -t issue2556 -f verification/2556/Dockerfile .
+      - uses: actions/cache@v4
+        with:
+          path: .verification-cache
+          key: issue2556-go-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+          restore-keys: issue2556-go-${{ hashFiles('go.sum') }}-
       - name: Build affected binary and run regression
         run: |
-          mkdir -p verification/2556/artifacts
-          docker run --rm --mount type=bind,src="$PWD",dst=/src,readonly --mount type=bind,src="$PWD/verification/2556/artifacts",dst=/out --mount type=volume,src=issue2556-go,dst=/go issue2556 bash -lc '
+          mkdir -p verification/2556/artifacts .verification-cache/go .verification-cache/build
+          docker run --rm --mount type=bind,src="$PWD",dst=/src,readonly --mount type=bind,src="$PWD/verification/2556/artifacts",dst=/out --mount type=bind,src="$PWD/.verification-cache/go",dst=/go --mount type=bind,src="$PWD/.verification-cache/build",dst=/cache issue2556 bash -lc '
             set -e
             cp -a /src /tmp/source
             cd /tmp/source
             export PATH=/usr/local/go/bin:$PATH
             export HOME=$(mktemp -d) XDG_CONFIG_HOME= XDG_DATA_HOME= XDG_CACHE_HOME=
+            export GOCACHE=/cache
             export AGENTDECK_SKIP_UPDATE_CHECK=1
+            git config --global --add safe.directory /tmp/source
             go build -o /out/agent-deck ./cmd/agent-deck
             set +e
             go test ./internal/session -run "^TestExitToShell_PiPrepareCommand$" -count=1 -v > /out/regression.log 2>&1
@@ -41,6 +48,9 @@ jobs:
           cat verification/2556/artifacts/reproduction/output.log
           echo "CLI_REPRO_EXIT=$rc"
           if [ "$rc" -gt 1 ]; then exit "$rc"; fi
+      - name: Make cache readable for the runner
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" .verification-cache
       - uses: actions/upload-artifact@v4
         if: always()
         with:
