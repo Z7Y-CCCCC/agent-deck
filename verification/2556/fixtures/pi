@@ -1,0 +1,14 @@
+#!/bin/sh
+if [ "${1:-}" = "--version" ]; then
+    echo 'pi 0.0.0-test'
+    exit 0
+fi
+echo PI_READY
+while IFS= read -r line; do
+    if [ "$line" = /exit ]; then
+        echo PI_EXITED
+        exit 0
+    fi
+done
+exit 0
+

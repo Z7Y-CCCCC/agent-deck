@@ -1,0 +1,49 @@
+name: Verify issue 2556 in isolated containers
+on:
+  push:
+    branches: [verify/2556-pi-exit-to-shell]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build verification image
+        run: docker build -t issue2556 -f verification/2556/Dockerfile .
+      - name: Build affected binary and run regression
+        run: |
+          mkdir -p verification/2556/artifacts
+          docker run --rm --mount type=bind,src="$PWD",dst=/src,readonly --mount type=bind,src="$PWD/verification/2556/artifacts",dst=/out --mount type=volume,src=issue2556-go,dst=/go issue2556 bash -lc '
+            set -e
+            cp -a /src /tmp/source
+            cd /tmp/source
+            export PATH=/usr/local/go/bin:$PATH
+            export HOME=$(mktemp -d) XDG_CONFIG_HOME= XDG_DATA_HOME= XDG_CACHE_HOME=
+            export AGENTDECK_SKIP_UPDATE_CHECK=1
+            go build -o /out/agent-deck ./cmd/agent-deck
+            set +e
+            go test ./internal/session -run "^TestExitToShell_PiPrepareCommand$" -count=1 -v > /out/regression.log 2>&1
+            rc=$?
+            cat /out/regression.log
+            echo "$rc" > /out/regression-exit.txt
+            exit 0
+          '
+      - name: Run real CLI reproduction offline
+        run: |
+          image=$(docker image inspect issue2556 --format '{{.Id}}')
+          set +e
+          python3 skills/deck-repro/scripts/run.py --image "$image" --binary verification/2556/artifacts/agent-deck --script verification/2556/repro.sh --fixtures verification/2556/fixtures --out verification/2556/artifacts/reproduction --timeout 120
+          rc=$?
+          cat verification/2556/artifacts/reproduction/output.log
+          echo "CLI_REPRO_EXIT=$rc"
+          if [ "$rc" -gt 1 ]; then exit "$rc"; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: issue2556-evidence
+          path: verification/2556/artifacts
+
