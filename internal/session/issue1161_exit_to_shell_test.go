@@ -3,6 +3,7 @@ package session
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -22,6 +23,62 @@ import (
 // non-agent / sandboxed sessions are unaffected.
 
 const exitToShellSuffix = `; exec "$SHELL" -i`
+
+func TestExitToShell_PiPrepareCommand(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		global   bool
+		override *bool
+		sandbox  bool
+		wantWrap bool
+	}{
+		{name: "global enabled", global: true, wantWrap: true},
+		{name: "override enabled", override: boolPtr(true), wantWrap: true},
+		{name: "override disabled", global: true, override: boolPtr(false)},
+		{name: "default disabled"},
+		{name: "sandbox excluded", global: true, sandbox: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exitToShellTestEnv(t)
+			configPath, err := GetUserConfigPath()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			config := "[shell]\nexit_to_shell = false\n"
+			if tc.global {
+				config = "[shell]\nexit_to_shell = true\n"
+			}
+			if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			ClearUserConfigCache()
+
+			inst := NewInstanceWithTool("e2s-pi", t.TempDir(), "pi")
+			inst.ExitToShell = tc.override
+			raw := inst.buildPiCommand("pi")
+			var prepared string
+			if tc.sandbox {
+				inst.Sandbox = &SandboxConfig{Enabled: true, Image: "agentdeck/sandbox:latest"}
+				prepared = inst.wrapExitToShell(raw)
+			} else {
+				prepared, _, err = inst.prepareCommand(raw)
+				if err != nil {
+					t.Fatalf("prepareCommand: %v", err)
+				}
+			}
+			want := raw
+			if tc.wantWrap {
+				want += exitToShellSuffix
+			}
+			if prepared != want {
+				t.Fatalf("pi command = %q, want %q", prepared, want)
+			}
+		})
+	}
+}
 
 // exitToShellTestEnv isolates CLAUDE_CONFIG_DIR / HOME so command building is
 // deterministic. Mirrors extraArgsTestEnv (extraargs_test.go:14).
