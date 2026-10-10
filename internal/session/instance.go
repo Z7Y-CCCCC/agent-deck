@@ -12932,6 +12932,7 @@ var builtinAgentTools = map[string]bool{
 	"hermes":   true,
 	"crush":    true,
 	"muse":     true,
+	"pi":       true,
 }
 
 // isBuiltinAgentTool reports whether tool is a first-party agent (or a custom
